@@ -14,10 +14,6 @@ import (
 	"cryptoWallet/messages"
 )
 
-//TODO:1)На гит закоммитить
-//TODO:2)удалить лишние msg, отправиьт один в конце update, постараться сократить код
-//TODO:3)в случае ошибок, вернуть через гит
-
 func main() {
 	bot, err := tgbotapi.NewBotAPI(mustToken())
 	if err != nil {
@@ -38,6 +34,8 @@ func main() {
 			continue
 		}
 
+		msg := tgbotapi.NewMessage(update.Message.Chat.ID, "")
+
 		if update.Message.IsCommand() {
 			switch update.Message.Text {
 			case "/start":
@@ -45,33 +43,25 @@ func main() {
 				username := update.Message.From.UserName
 
 				if userIsExist(chatID) {
-					msg := tgbotapi.NewMessage(chatID, messages.UserExistMessage)
-					bot.Send(msg)
+					errMsg := tgbotapi.NewMessage(chatID, messages.UserExistMessage)
+					bot.Send(errMsg)
 					continue
 				}
 
 				if err := addUser(chatID, username); err != nil {
-					msg := tgbotapi.NewMessage(chatID, messages.AddToDbError)
-					bot.Send(msg)
+					errMsg := tgbotapi.NewMessage(chatID, messages.AddToDbError)
+					bot.Send(errMsg)
 					continue
 				}
 
-				msg := tgbotapi.NewMessage(chatID, messages.StartMessage)
+				msg.Text = messages.StartMessage
 				msg.ReplyMarkup = keyboards.AssembleKeyboard
 
-				if _, err := bot.Send(msg); err != nil {
-					log.Printf("Ошибка отправки: %s", err.Error())
-					continue
-				}
 			case "/help":
-				msg := tgbotapi.NewMessage(update.Message.Chat.ID, messages.HelpMessage)
-				if _, err := bot.Send(msg); err != nil {
-					log.Printf("Ошибка отправки: %s", err.Error())
-					continue
-				}
+				msg.Text = messages.HelpMessage
+
 			case "/delete":
 				chatID := update.Message.Chat.ID
-				msg := tgbotapi.NewMessage(chatID, "")
 
 				if !userIsExist(chatID) {
 					msg.Text = messages.UserNotExistMessage
@@ -88,11 +78,12 @@ func main() {
 
 				msg.Text = messages.RemoveToDbMessage
 				msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
-				if _, err := bot.Send(msg); err != nil {
-					log.Printf("Ошибка отправки: %s", err.Error())
-					continue
-				}
 			}
+		}
+
+		if _, err := bot.Send(msg); err != nil {
+			log.Printf("Ошибка отправки: %s", err.Error())
+			continue
 		}
 	}
 }
