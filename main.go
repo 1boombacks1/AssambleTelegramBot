@@ -1,0 +1,203 @@
+package main
+
+import (
+	"cryptoWallet/models"
+	"encoding/json"
+	"flag"
+	"io/fs"
+	"io/ioutil"
+	"log"
+
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+
+	"cryptoWallet/keyboards"
+	"cryptoWallet/messages"
+)
+
+//TODO:1)На гит закоммитить
+//TODO:2)удалить лишние msg, отправиьт один в конце update, постараться сократить код
+//TODO:3)в случае ошибок, вернуть через гит
+
+func main() {
+	bot, err := tgbotapi.NewBotAPI(mustToken())
+	if err != nil {
+		log.Panic(err)
+	}
+
+	bot.Debug = true
+
+	log.Printf("Authorized on account %s", bot.Self.UserName)
+
+	u := tgbotapi.NewUpdate(0)
+	u.Timeout = 60
+
+	updates := bot.GetUpdatesChan(u)
+
+	for update := range updates {
+		if update.Message == nil {
+			continue
+		}
+
+		if update.Message.IsCommand() {
+			switch update.Message.Text {
+			case "/start":
+				chatID := update.Message.Chat.ID
+				username := update.Message.From.UserName
+
+				if userIsExist(chatID) {
+					msg := tgbotapi.NewMessage(chatID, messages.UserExistMessage)
+					bot.Send(msg)
+					continue
+				}
+
+				if err := addUser(chatID, username); err != nil {
+					msg := tgbotapi.NewMessage(chatID, messages.AddToDbError)
+					bot.Send(msg)
+					continue
+				}
+
+				msg := tgbotapi.NewMessage(chatID, messages.StartMessage)
+				msg.ReplyMarkup = keyboards.AssembleKeyboard
+
+				if _, err := bot.Send(msg); err != nil {
+					log.Printf("Ошибка отправки: %s", err.Error())
+					continue
+				}
+			case "/help":
+				msg := tgbotapi.NewMessage(update.Message.Chat.ID, messages.HelpMessage)
+				if _, err := bot.Send(msg); err != nil {
+					log.Printf("Ошибка отправки: %s", err.Error())
+					continue
+				}
+			case "/delete":
+				chatID := update.Message.Chat.ID
+				msg := tgbotapi.NewMessage(chatID, "")
+
+				if !userIsExist(chatID) {
+					msg.Text = messages.UserNotExistMessage
+					bot.Send(msg)
+					continue
+				}
+
+				if err := deleteUser(chatID); err != nil {
+					log.Printf("Ошибка удаление с бд: %s", err.Error())
+					msg.Text = messages.RemoveToDbError
+					bot.Send(msg)
+					continue
+				}
+
+				msg.Text = messages.RemoveToDbMessage
+				msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
+				if _, err := bot.Send(msg); err != nil {
+					log.Printf("Ошибка отправки: %s", err.Error())
+					continue
+				}
+			}
+		}
+	}
+}
+
+func userIsExist(chatID int64) bool {
+	users, err := getUsers()
+	if err != nil {
+		return false
+	}
+	for _, user := range users {
+		if user.ChatID == chatID {
+			return true
+		}
+	}
+	return false
+}
+
+func deleteUser(chatID int64) error {
+	users, err := getUsers()
+	if err != nil {
+		return err
+	}
+
+	updateUsers := users
+
+	for i, user := range users {
+		if user.ChatID == chatID {
+			updateUsers = removeIndex(users, i)
+			break
+		}
+	}
+
+	if err := writeUsers(updateUsers); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func addUser(chatID int64, username string) error {
+	users, err := getUsers()
+	if err != nil {
+		return err
+	}
+
+	user := models.User{
+		ChatID:   chatID,
+		Username: username,
+	}
+	users = append(users, user)
+
+	if err := writeUsers(users); err != nil {
+		return err
+	}
+	return nil
+}
+
+func writeUsers(users []models.User) error {
+	data, err := json.Marshal(users)
+	if err != nil {
+		log.Printf("Не удалось маршануть данные: %s", err.Error())
+		return err
+	}
+
+	if err = ioutil.WriteFile("data/users.json", data, fs.ModePerm); err != nil {
+		log.Printf("Не удалось записать данные в файл: %s", err.Error())
+		return err
+	}
+	return nil
+}
+
+func removeIndex(users []models.User, i int) []models.User {
+	newArr := make([]models.User, 0)
+	newArr = append(newArr, users[:i]...)
+	return append(newArr, users[i+1:]...)
+}
+
+func getUsers() ([]models.User, error) {
+	file, err := ioutil.ReadFile("data/users.json")
+	if err != nil {
+		log.Printf("Не удалось прочитать файл: users.json <%s>", err.Error())
+		return nil, err
+	}
+
+	var users []models.User
+
+	if err = json.Unmarshal(file, &users); err != nil {
+		log.Printf("Не удалось Анмаршануть данные: %s", err.Error())
+		return nil, err
+	}
+
+	return users, nil
+}
+
+func mustToken() string {
+	token := flag.String(
+		"bot-token",
+		"",
+		"telegram bot token for the application to work",
+	)
+
+	flag.Parse()
+
+	if *token == "" {
+		log.Fatal("No token entered")
+	}
+	return *token
+}
