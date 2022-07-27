@@ -9,15 +9,21 @@ const (
 	LATER  = "later"
 )
 
+const (
+	AssembleText = "Квадрат ОБЩИЙ СБОР!👊"
+	ComingText   = "Уже выдвигаюсь!🧑‍🦽"
+	LaterText    = "Одалею монстра и подскачу!🤼"
+)
+
 var AssembleKeyboard = tgbotapi.NewReplyKeyboard(
 	tgbotapi.NewKeyboardButtonRow(
-		tgbotapi.NewKeyboardButton("Квадрат ОБЩИЙ СБОР!👊"),
+		tgbotapi.NewKeyboardButton(AssembleText),
 	),
 )
 
 var InlineArriveKeyboard = tgbotapi.NewInlineKeyboardMarkup(
 	tgbotapi.NewInlineKeyboardRow(
-		tgbotapi.NewInlineKeyboardButtonData("Уже выдвигаюсь!🧑‍🦽", COMING),
-		tgbotapi.NewInlineKeyboardButtonData("Одалею монстра и подскачу!🤼", LATER),
+		tgbotapi.NewInlineKeyboardButtonData(ComingText, COMING),
+		tgbotapi.NewInlineKeyboardButtonData(LaterText, LATER),
 	),
 )

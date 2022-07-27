@@ -88,6 +88,22 @@ func main() {
 	}
 }
 
+func sendAll(bot *tgbotapi.BotAPI, text string) error {
+	users, err := getUsers()
+	if err != nil {
+		return err
+	}
+
+	for _, user := range users {
+		chatID := user.ChatID
+		msg := tgbotapi.NewMessage(chatID, text)
+		if _, err := bot.Send(msg); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func userIsExist(chatID int64) bool {
 	users, err := getUsers()
 	if err != nil {
