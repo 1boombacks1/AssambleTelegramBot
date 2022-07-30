@@ -4,6 +4,7 @@ import (
 	"cryptoWallet/models"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"io/fs"
 	"io/ioutil"
 	"log"
@@ -13,6 +14,8 @@ import (
 	"cryptoWallet/keyboards"
 	"cryptoWallet/messages"
 )
+
+var bot *tgbotapi.BotAPI
 
 func main() {
 	bot, err := tgbotapi.NewBotAPI(mustToken())
@@ -81,27 +84,34 @@ func main() {
 			}
 		}
 
-		if _, err := bot.Send(msg); err != nil {
-			log.Printf("Ошибка отправки: %s", err.Error())
+		if update.Message.Text == keyboards.AssembleText {
+			users, err := getUsers()
+			if err != nil {
+				log.Printf("Ошибка получения пользователей: %s", err.Error())
+			}
+
+			convenerName := update.Message.From.UserName
+			text := fmt.Sprintf("%s созывает на стык!🤘", convenerName)
+
+			for _, user := range users {
+				msgForUser := tgbotapi.NewMessage(user.ChatID, text)
+				if _, err := bot.Send(msgForUser); err != nil {
+					errMsg := tgbotapi.NewMessage(update.Message.Chat.ID, messages.AssembleError)
+					bot.Send(errMsg)
+					break
+				}
+			}
 			continue
+		} else {
+			if msg.Text == "" {
+				msg.Text = messages.NotCorrectCommandMessage
+			}
+			if _, err := bot.Send(msg); err != nil {
+				log.Printf("Ошибка отправки: %s", err.Error())
+				continue
+			}
 		}
 	}
-}
-
-func sendAll(bot *tgbotapi.BotAPI, text string) error {
-	users, err := getUsers()
-	if err != nil {
-		return err
-	}
-
-	for _, user := range users {
-		chatID := user.ChatID
-		msg := tgbotapi.NewMessage(chatID, text)
-		if _, err := bot.Send(msg); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func userIsExist(chatID int64) bool {
