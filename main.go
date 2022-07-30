@@ -8,14 +8,13 @@ import (
 	"io/fs"
 	"io/ioutil"
 	"log"
+	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
 	"cryptoWallet/keyboards"
 	"cryptoWallet/messages"
 )
-
-var bot *tgbotapi.BotAPI
 
 func main() {
 	bot, err := tgbotapi.NewBotAPI(mustToken())
@@ -90,8 +89,15 @@ func main() {
 				log.Printf("Ошибка получения пользователей: %s", err.Error())
 			}
 
+			if dur, ok := checkForSending(update.Message.Chat.ID); !ok {
+				text := fmt.Sprintf("Вы сможете подтянуть рыцарей через: %s ⌛", dur)
+				msg := tgbotapi.NewMessage(update.Message.Chat.ID, text)
+				bot.Send(msg)
+				continue
+			}
+
 			convenerName := update.Message.From.UserName
-			text := fmt.Sprintf("%s созывает на стык!🤘", convenerName)
+			text := fmt.Sprintf("@%s созывает на стык!🤘", convenerName)
 
 			for _, user := range users {
 				msgForUser := tgbotapi.NewMessage(user.ChatID, text)
@@ -101,7 +107,10 @@ func main() {
 					break
 				}
 			}
+
+			updateAttempts(update.Message.Chat.ID)
 			continue
+
 		} else {
 			if msg.Text == "" {
 				msg.Text = messages.NotCorrectCommandMessage
@@ -112,6 +121,45 @@ func main() {
 			}
 		}
 	}
+}
+
+func checkForSending(chatID int64) (string, bool) {
+	users, _ := getUsers()
+	for _, user := range users {
+		if chatID == user.ChatID {
+			duration := time.Since(user.Timer).Round(time.Second)
+			if user.Attempts > 0 {
+				return "", true
+			} else if user.Attempts == 0 &&
+				duration.Seconds() < (time.Minute*5).Seconds() {
+				return time.Until(user.Timer.Add(5 * time.Minute)).Round(time.Second).String(), false
+			}
+			break
+		}
+	}
+	return "", true
+}
+
+func updateAttempts(chatID int64) {
+	users, _ := getUsers()
+	for i, user := range users {
+		if user.ChatID == chatID {
+			if user.Attempts == 2 {
+				users[i].Attempts--
+				users[i].Timer = time.Now()
+			} else if user.Attempts == 1 {
+				users[i].Attempts--
+			} else {
+				duration := time.Since(user.Timer)
+				if duration.Seconds() > (time.Minute * 5).Seconds() {
+					users[i].Attempts = 2
+					users[i].Timer = time.Time{}
+				}
+			}
+			break
+		}
+	}
+	writeUsers(users)
 }
 
 func userIsExist(chatID int64) bool {
@@ -158,6 +206,8 @@ func addUser(chatID int64, username string) error {
 	user := models.User{
 		ChatID:   chatID,
 		Username: username,
+		Attempts: 2,
+		Timer:    time.Time{},
 	}
 	users = append(users, user)
 
