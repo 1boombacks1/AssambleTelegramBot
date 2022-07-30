@@ -22,7 +22,7 @@ func main() {
 		log.Panic(err)
 	}
 
-	bot.Debug = true
+	bot.Debug = false
 
 	log.Printf("Authorized on account %s", bot.Self.UserName)
 
@@ -56,6 +56,8 @@ func main() {
 					continue
 				}
 
+				log.Printf("Registred user: %s", username)
+
 				msg.Text = messages.StartMessage
 				msg.ReplyMarkup = keyboards.AssembleKeyboard
 
@@ -78,6 +80,8 @@ func main() {
 					continue
 				}
 
+				log.Printf("Deleted user: %s", update.Message.Chat.UserName)
+
 				msg.Text = messages.RemoveToDbMessage
 				msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
 			}
@@ -90,6 +94,7 @@ func main() {
 			}
 
 			if dur, ok := checkForSending(update.Message.Chat.ID); !ok {
+				log.Printf("%s trying gather to party", update.Message.Chat.UserName)
 				text := fmt.Sprintf("Вы сможете подтянуть рыцарей через: %s ⌛", dur)
 				msg := tgbotapi.NewMessage(update.Message.Chat.ID, text)
 				bot.Send(msg)
@@ -108,11 +113,13 @@ func main() {
 				}
 			}
 
+			log.Printf("%s called everyone together", update.Message.Chat.UserName)
 			updateAttempts(update.Message.Chat.ID)
 			continue
 
 		} else {
 			if msg.Text == "" {
+				log.Printf("%s writed: %s", update.Message.Chat.UserName, update.Message.Text)
 				msg.Text = messages.NotCorrectCommandMessage
 			}
 			if _, err := bot.Send(msg); err != nil {
