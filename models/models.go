@@ -8,3 +8,15 @@ type User struct {
 	Attempts byte      `json:"attempts"`
 	Timer    time.Time `json:"timer"`
 }
+
+type MessageData struct {
+	ChatID    int64 `json:"chat_id"`
+	MessageID int64 `json:"message_id"`
+}
+
+type AssambleInfo struct {
+	ID                  int           `json:"info_id"`
+	AllUsersMessageData []MessageData `json:"list_message_data"`
+	ComeUsers           []string      `json:"come_users"`
+	NotComeUsers        []string      `json:"not_come_users"`
+}

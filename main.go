@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"io/ioutil"
 	"log"
+	"math/rand"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -32,102 +33,298 @@ func main() {
 	updates := bot.GetUpdatesChan(u)
 
 	for update := range updates {
-		if update.Message == nil {
-			continue
-		}
+		if update.Message != nil {
 
-		msg := tgbotapi.NewMessage(update.Message.Chat.ID, "")
+			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "")
 
-		if update.Message.IsCommand() {
-			switch update.Message.Text {
-			case "/start":
-				chatID := update.Message.Chat.ID
-				username := update.Message.From.UserName
+			if update.Message.IsCommand() {
+				switch update.Message.Text {
+				case "/start":
+					chatID := update.Message.Chat.ID
+					username := update.Message.From.UserName
 
-				if userIsExist(chatID) {
-					errMsg := tgbotapi.NewMessage(chatID, messages.UserExistMessage)
-					bot.Send(errMsg)
-					continue
+					if userIsExist(chatID) {
+						errMsg := tgbotapi.NewMessage(chatID, messages.UserExistMessage)
+						bot.Send(errMsg)
+						continue
+					}
+
+					if err := addUser(chatID, username); err != nil {
+						errMsg := tgbotapi.NewMessage(chatID, messages.AddToDbError)
+						bot.Send(errMsg)
+						continue
+					}
+
+					log.Printf("Registred user: %s", username)
+
+					msg.Text = messages.StartMessage
+					msg.ReplyMarkup = keyboards.AssembleKeyboard
+
+				case "/help":
+					msg.Text = messages.HelpMessage
+
+				case "/delete":
+					chatID := update.Message.Chat.ID
+
+					if !userIsExist(chatID) {
+						msg.Text = messages.UserNotExistMessage
+						bot.Send(msg)
+						continue
+					}
+
+					if err := deleteUser(chatID); err != nil {
+						log.Printf("Ошибка удаление с бд: %s", err.Error())
+						msg.Text = messages.RemoveToDbError
+						bot.Send(msg)
+						continue
+					}
+
+					log.Printf("Deleted user: %s", update.Message.Chat.UserName)
+
+					msg.Text = messages.RemoveToDbMessage
+					msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
+				}
+			}
+
+			if update.Message.Text == keyboards.AssembleText {
+				users, err := getUsers()
+				if err != nil {
+					log.Printf("Ошибка получения пользователей: %s", err.Error())
 				}
 
-				if err := addUser(chatID, username); err != nil {
-					errMsg := tgbotapi.NewMessage(chatID, messages.AddToDbError)
-					bot.Send(errMsg)
-					continue
-				}
-
-				log.Printf("Registred user: %s", username)
-
-				msg.Text = messages.StartMessage
-				msg.ReplyMarkup = keyboards.AssembleKeyboard
-
-			case "/help":
-				msg.Text = messages.HelpMessage
-
-			case "/delete":
-				chatID := update.Message.Chat.ID
-
-				if !userIsExist(chatID) {
-					msg.Text = messages.UserNotExistMessage
+				if dur, ok := checkForSending(update.Message.Chat.ID); !ok {
+					log.Printf("%s trying gather to party", update.Message.Chat.UserName)
+					text := fmt.Sprintf("Вы сможете подтянуть рыцарей через: %s ⌛", dur)
+					msg := tgbotapi.NewMessage(update.Message.Chat.ID, text)
 					bot.Send(msg)
 					continue
 				}
 
-				if err := deleteUser(chatID); err != nil {
-					log.Printf("Ошибка удаление с бд: %s", err.Error())
-					msg.Text = messages.RemoveToDbError
-					bot.Send(msg)
-					continue
+				convenerName := update.Message.From.UserName
+				text := fmt.Sprintf("@%s созывает на стык!🤘", convenerName)
+
+				var allUsersMessageData []models.MessageData
+
+				for _, user := range users {
+					msgForUser := tgbotapi.NewMessage(user.ChatID, text)
+					msgForUser.ReplyMarkup = keyboards.InlineArriveKeyboard
+
+					sendMsg, err := bot.Send(msgForUser)
+					if err != nil {
+						errMsg := tgbotapi.NewMessage(update.Message.Chat.ID, messages.AssembleError)
+						bot.Send(errMsg)
+						break
+					}
+
+					messageData := models.MessageData{
+						ChatID:    user.ChatID,
+						MessageID: int64(sendMsg.MessageID),
+					}
+					allUsersMessageData = append(allUsersMessageData, messageData)
 				}
 
-				log.Printf("Deleted user: %s", update.Message.Chat.UserName)
+				log.Printf("%s called everyone together", update.Message.Chat.UserName)
+				updateAttempts(update.Message.Chat.ID)
 
-				msg.Text = messages.RemoveToDbMessage
-				msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
-			}
-		}
-
-		if update.Message.Text == keyboards.AssembleText {
-			users, err := getUsers()
-			if err != nil {
-				log.Printf("Ошибка получения пользователей: %s", err.Error())
-			}
-
-			if dur, ok := checkForSending(update.Message.Chat.ID); !ok {
-				log.Printf("%s trying gather to party", update.Message.Chat.UserName)
-				text := fmt.Sprintf("Вы сможете подтянуть рыцарей через: %s ⌛", dur)
-				msg := tgbotapi.NewMessage(update.Message.Chat.ID, text)
-				bot.Send(msg)
+				if err := addAssambleInfo(allUsersMessageData); err != nil {
+					log.Print(messages.SetDataError)
+				}
 				continue
+
+			} else {
+				if msg.Text == "" {
+					log.Printf("%s writed: %s", update.Message.Chat.UserName, update.Message.Text)
+					msg.Text = messages.NotCorrectCommandMessage
+				}
+				if _, err := bot.Send(msg); err != nil {
+					log.Printf("Ошибка отправки: %s", err.Error())
+					continue
+				}
+			}
+		} else if update.CallbackQuery != nil {
+			log.Printf("get callback")
+			allAssambleMsg, err := getAllAssambleInfo()
+			users, _ := getUsers()
+
+			if err != nil {
+				log.Print(messages.GetDataError)
+				return
 			}
 
-			convenerName := update.Message.From.UserName
-			text := fmt.Sprintf("@%s созывает на стык!🤘", convenerName)
+			var currentUser models.User
+			var currentAssambleInfo models.AssambleInfo
 
 			for _, user := range users {
-				msgForUser := tgbotapi.NewMessage(user.ChatID, text)
-				if _, err := bot.Send(msgForUser); err != nil {
-					errMsg := tgbotapi.NewMessage(update.Message.Chat.ID, messages.AssembleError)
-					bot.Send(errMsg)
-					break
+				if user.ChatID == update.CallbackQuery.Message.Chat.ID {
+					currentUser = user
 				}
 			}
 
-			log.Printf("%s called everyone together", update.Message.Chat.UserName)
-			updateAttempts(update.Message.Chat.ID)
-			continue
-
-		} else {
-			if msg.Text == "" {
-				log.Printf("%s writed: %s", update.Message.Chat.UserName, update.Message.Text)
-				msg.Text = messages.NotCorrectCommandMessage
+			for _, assambleInfo := range allAssambleMsg {
+				for _, msg := range assambleInfo.AllUsersMessageData {
+					if msg.ChatID == update.CallbackQuery.Message.Chat.ID && msg.MessageID == int64(update.CallbackQuery.Message.MessageID) {
+						currentAssambleInfo = assambleInfo
+						break
+					}
+				}
 			}
-			if _, err := bot.Send(msg); err != nil {
-				log.Printf("Ошибка отправки: %s", err.Error())
-				continue
+
+			callback := prepareCallback(currentAssambleInfo, update.CallbackQuery.ID, update.CallbackQuery.Data)
+			if _, err := bot.Request(callback); err != nil {
+				log.Printf("Ошибка: %s", err.Error())
+			}
+
+			if update.CallbackQuery.Data == keyboards.COMING {
+				inNotComes := false
+				for i, username := range currentAssambleInfo.NotComeUsers {
+					if username == currentUser.Username {
+						currentAssambleInfo.NotComeUsers = removeIndexAssambleUsers(currentAssambleInfo.NotComeUsers, i)
+						currentAssambleInfo.ComeUsers = append(currentAssambleInfo.ComeUsers, currentUser.Username)
+						inNotComes = true
+						break
+					}
+				}
+				if !inNotComes {
+					currentAssambleInfo.ComeUsers = append(currentAssambleInfo.ComeUsers, currentUser.Username)
+				}
+
+				updateAssambleInfo(currentAssambleInfo)
+				sendAllUpdatedKeyboard(bot, currentAssambleInfo)
+
+			} else if update.CallbackQuery.Data == keyboards.LATER {
+				inComes := false
+
+				for i, username := range currentAssambleInfo.ComeUsers {
+					if username == currentUser.Username {
+						currentAssambleInfo.ComeUsers = removeIndexAssambleUsers(currentAssambleInfo.ComeUsers, i)
+						currentAssambleInfo.NotComeUsers = append(currentAssambleInfo.NotComeUsers, currentUser.Username)
+						inComes = true
+						break
+					}
+				}
+
+				if !inComes {
+					currentAssambleInfo.NotComeUsers = append(currentAssambleInfo.NotComeUsers, currentUser.Username)
+				}
+
+				updateAssambleInfo(currentAssambleInfo)
+				sendAllUpdatedKeyboard(bot, currentAssambleInfo)
 			}
 		}
 	}
+}
+
+func prepareCallback(assambleInfo models.AssambleInfo, callbackID string, callbackType string) tgbotapi.CallbackConfig {
+	var text = "Принято! 🤙"
+	var callback = tgbotapi.NewCallback(callbackID, text)
+	if callbackType == keyboards.SHOW {
+		text = "Мчаться🏂:\n"
+		for i, username := range assambleInfo.ComeUsers {
+			text += fmt.Sprintf("%d. %s\n", i+1, username)
+		}
+		text += "Будут попозжа👨‍🦯:\n"
+		for i, username := range assambleInfo.NotComeUsers {
+			text += fmt.Sprintf("%d. %s\n", i+1, username)
+		}
+		callback = tgbotapi.NewCallback(callbackID, text)
+		callback.ShowAlert = true
+	}
+	return callback
+}
+
+func sendAllUpdatedKeyboard(bot *tgbotapi.BotAPI, assambleInfo models.AssambleInfo) {
+	for _, msgData := range assambleInfo.AllUsersMessageData {
+		comingText := fmt.Sprintf("Уже выдвигаюсь!🧑‍🦽\n[Рыцарей: %d]", len(assambleInfo.ComeUsers))
+		laterText := fmt.Sprintf("Буду попозжа!🤼\n[Рыцарей: %d]", len(assambleInfo.NotComeUsers))
+		keyboard := tgbotapi.NewInlineKeyboardMarkup(
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData(comingText, keyboards.COMING),
+				tgbotapi.NewInlineKeyboardButtonData(laterText, keyboards.LATER),
+			),
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("Показать рыцарей ⚔️", keyboards.SHOW),
+			),
+		)
+		cfg := tgbotapi.NewEditMessageReplyMarkup(msgData.ChatID, int(msgData.MessageID), keyboard)
+		bot.Send(cfg)
+	}
+}
+
+func removeIndexAssambleUsers(users []string, i int) []string {
+	newArr := make([]string, 0)
+	newArr = append(newArr, users[:i]...)
+	return append(newArr, users[i+1:]...)
+}
+
+func updateAssambleInfo(updatedAssambleInfo models.AssambleInfo) error {
+	allAssambleInfo, err := getAllAssambleInfo()
+	if err != nil {
+		log.Printf("Не удалось получить объекты : []models.AssambleInfo :", err.Error())
+		return err
+	}
+	for i, assambleInfo := range allAssambleInfo {
+		if assambleInfo.ID == updatedAssambleInfo.ID {
+			allAssambleInfo[i] = updatedAssambleInfo
+			break
+		}
+	}
+
+	if err := writeAssambleInfo(allAssambleInfo); err != nil {
+		return err
+	}
+	return nil
+}
+
+func addAssambleInfo(allUsersMessage []models.MessageData) error {
+	allAssambleInfos, err := getAllAssambleInfo()
+	if err != nil {
+		return err
+	}
+
+	rand.Seed(time.Now().UnixNano())
+
+	rnd := rand.Int31()
+
+	assambleInfo := models.AssambleInfo{
+		ID:                  int(rnd),
+		AllUsersMessageData: allUsersMessage,
+		ComeUsers:           []string{},
+		NotComeUsers:        []string{},
+	}
+
+	allAssambleInfos = append(allAssambleInfos, assambleInfo)
+
+	if err := writeAssambleInfo(allAssambleInfos); err != nil {
+		return err
+	}
+	return nil
+}
+
+func writeAssambleInfo(arr []models.AssambleInfo) error {
+	data, err := json.Marshal(arr)
+	if err != nil {
+		log.Printf("Не удалось маршануть данные: %s", err.Error())
+		return err
+	}
+	if err := ioutil.WriteFile("data/assambleInfo.json", data, fs.ModePerm); err != nil {
+		log.Printf("Не удалось записать данные в assambleInfo.json: %s", err.Error())
+		return err
+	}
+	return nil
+}
+
+func getAllAssambleInfo() ([]models.AssambleInfo, error) {
+	file, err := ioutil.ReadFile("data/assambleInfo.json")
+	if err != nil {
+		log.Printf("Не удалось прочитать файл assambleInfo.json : %s", err.Error())
+		return nil, err
+	}
+	var data []models.AssambleInfo
+	if err = json.Unmarshal(file, &data); err != nil {
+		log.Printf("Не удалось анмаршануть данные: %s", err.Error())
+		return nil, err
+	}
+	return data, nil
 }
 
 func checkForSending(chatID int64) (string, bool) {

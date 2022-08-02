@@ -7,12 +7,13 @@ import (
 const (
 	COMING = "coming"
 	LATER  = "later"
+	SHOW   = "show"
 )
 
 const (
 	AssembleText = "Квадрат ОБЩИЙ СБОР!👊"
 	ComingText   = "Уже выдвигаюсь!🧑‍🦽"
-	LaterText    = "Одалею монстра и подскачу!🤼"
+	LaterText    = "Буду попозжа!🤼"
 )
 
 var AssembleKeyboard = tgbotapi.NewReplyKeyboard(
