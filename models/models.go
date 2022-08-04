@@ -15,8 +15,8 @@ type MessageData struct {
 }
 
 type AssambleInfo struct {
-	ID                  int           `json:"info_id"`
-	AllUsersMessageData []MessageData `json:"list_message_data"`
-	ComeUsers           []string      `json:"come_users"`
-	NotComeUsers        []string      `json:"not_come_users"`
+	ID                  int                      `json:"info_id"`
+	AllUsersMessageData []MessageData            `json:"list_message_data"`
+	ComeUsers           map[string][]MessageData `json:"come_users"`
+	NotComeUsers        map[string][]MessageData `json:"not_come_users"`
 }

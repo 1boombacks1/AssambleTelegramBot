@@ -137,7 +137,7 @@ func main() {
 					msg.Text = messages.NotCorrectCommandMessage
 				}
 				if _, err := bot.Send(msg); err != nil {
-					log.Printf("Ошибка отправки: %s", err.Error())
+					log.Printf(messages.SendMsgError, err.Error())
 					continue
 				}
 			}
@@ -192,36 +192,38 @@ func laterCallbackHandler(
 	currentUser models.User,
 	users []models.User,
 ) {
-	for _, username := range currentAssambleInfo.NotComeUsers {
-		if username == currentUser.Username {
-			return
-		}
+	if _, ok := currentAssambleInfo.NotComeUsers[currentUser.Username]; ok {
+		return
 	}
 
 	inComes := false
 
-	for i, username := range currentAssambleInfo.ComeUsers {
-		if username == currentUser.Username {
-			currentAssambleInfo.ComeUsers = removeIndexAssambleUsers(currentAssambleInfo.ComeUsers, i)
-			currentAssambleInfo.NotComeUsers = append(currentAssambleInfo.NotComeUsers, currentUser.Username)
-			inComes = true
-			break
+	if _, ok := currentAssambleInfo.ComeUsers[currentUser.Username]; ok {
+		currentAssambleInfo.NotComeUsers[currentUser.Username] = currentAssambleInfo.ComeUsers[currentUser.Username]
+		delete(currentAssambleInfo.ComeUsers, currentUser.Username)
+
+		for _, msgData := range currentAssambleInfo.NotComeUsers[currentUser.Username] {
+			text := fmt.Sprintf(messages.LaterComeMsg, currentUser.Username)
+			editMsg := tgbotapi.NewEditMessageText(
+				msgData.ChatID,
+				int(msgData.MessageID),
+				text,
+			)
+			bot.Send(editMsg)
 		}
+		inComes = true
 	}
 
 	if !inComes {
-		currentAssambleInfo.NotComeUsers = append(currentAssambleInfo.NotComeUsers, currentUser.Username)
+		allMsgData, err := sendAllCallbackMsg(bot, users, currentUser.Username, messages.LaterComeMsg)
+		if err != nil {
+			log.Printf(messages.SendMsgError, err.Error())
+			return
+		}
+		currentAssambleInfo.NotComeUsers[currentUser.Username] = allMsgData
 	}
 
 	updateAssambleInfo(currentAssambleInfo)
-
-	for _, user := range users {
-		text := fmt.Sprintf("@%s: будет как освободится⏳", currentUser.Username)
-		msg := tgbotapi.NewMessage(user.ChatID, text)
-		if _, err := bot.Send(msg); err != nil {
-			log.Printf("Пользователю %s не отправилось сообщение. %s", user.Username, err.Error())
-		}
-	}
 }
 
 func comingCallbackHandler(
@@ -230,35 +232,62 @@ func comingCallbackHandler(
 	currentUser models.User,
 	users []models.User,
 ) {
-	for _, username := range currentAssambleInfo.ComeUsers {
-		if username == currentUser.Username {
-			return
-		}
+	if _, ok := currentAssambleInfo.ComeUsers[currentUser.Username]; ok {
+		return
 	}
 
 	inNotComes := false
+	if _, ok := currentAssambleInfo.NotComeUsers[currentUser.Username]; ok {
+		currentAssambleInfo.ComeUsers[currentUser.Username] = currentAssambleInfo.NotComeUsers[currentUser.Username]
+		delete(currentAssambleInfo.NotComeUsers, currentUser.Username)
 
-	for i, username := range currentAssambleInfo.NotComeUsers {
-		if username == currentUser.Username {
-			currentAssambleInfo.NotComeUsers = removeIndexAssambleUsers(currentAssambleInfo.NotComeUsers, i)
-			currentAssambleInfo.ComeUsers = append(currentAssambleInfo.ComeUsers, currentUser.Username)
-			inNotComes = true
-			break
+		for _, msgData := range currentAssambleInfo.ComeUsers[currentUser.Username] {
+			text := fmt.Sprintf(messages.SoonComeMsg, currentUser.Username)
+			editMsg := tgbotapi.NewEditMessageText(
+				msgData.ChatID,
+				int(msgData.MessageID),
+				text,
+			)
+			bot.Send(editMsg)
 		}
+		inNotComes = true
 	}
+
 	if !inNotComes {
-		currentAssambleInfo.ComeUsers = append(currentAssambleInfo.ComeUsers, currentUser.Username)
+		allMsgData, err := sendAllCallbackMsg(bot, users, currentUser.Username, messages.SoonComeMsg)
+		if err != nil {
+			log.Printf(messages.SendMsgError, err.Error())
+			return
+		}
+		currentAssambleInfo.ComeUsers[currentUser.Username] = allMsgData
 	}
 
 	updateAssambleInfo(currentAssambleInfo)
+}
 
+func sendAllCallbackMsg(
+	bot *tgbotapi.BotAPI,
+	users []models.User,
+	currentUser string,
+	msgText string) ([]models.MessageData, error) {
+	var allMsgData []models.MessageData
 	for _, user := range users {
-		text := fmt.Sprintf("@%s: мчиться на райончик🏃", currentUser.Username)
+		text := fmt.Sprintf(msgText, currentUser)
 		msg := tgbotapi.NewMessage(user.ChatID, text)
-		if _, err := bot.Send(msg); err != nil {
-			log.Printf("Пользователю %s не отправилось сообщение. %s", user.Username, err.Error())
+		sendMsg, err := bot.Send(msg)
+
+		if err != nil {
+			return nil, err
 		}
+
+		msgData := models.MessageData{
+			ChatID:    user.ChatID,
+			MessageID: int64(sendMsg.MessageID),
+		}
+
+		allMsgData = append(allMsgData, msgData)
 	}
+	return allMsgData, nil
 }
 
 func prepareCallback(assambleInfo models.AssambleInfo, callbackID string, callbackType string) tgbotapi.CallbackConfig {
@@ -266,12 +295,15 @@ func prepareCallback(assambleInfo models.AssambleInfo, callbackID string, callba
 	var callback = tgbotapi.NewCallback(callbackID, text)
 	if callbackType == keyboards.SHOW {
 		text = "Мчаться🏂:\n"
-		for i, username := range assambleInfo.ComeUsers {
-			text += fmt.Sprintf("%d. %s\n", i+1, username)
+		counter := 1
+		for username := range assambleInfo.ComeUsers {
+			text += fmt.Sprintf("%d. %s\n", counter, username)
+			counter++
 		}
 		text += "Будут попозжа👨‍🦯:\n"
-		for i, username := range assambleInfo.NotComeUsers {
-			text += fmt.Sprintf("%d. %s\n", i+1, username)
+		for username := range assambleInfo.NotComeUsers {
+			text += fmt.Sprintf("%d. %s\n", counter, username)
+			counter++
 		}
 		callback = tgbotapi.NewCallback(callbackID, text)
 		callback.ShowAlert = true
@@ -287,16 +319,10 @@ func sendAllUpdatedKeyboard(bot *tgbotapi.BotAPI, assambleInfo models.AssambleIn
 	}
 }
 
-func removeIndexAssambleUsers(users []string, i int) []string {
-	newArr := make([]string, 0)
-	newArr = append(newArr, users[:i]...)
-	return append(newArr, users[i+1:]...)
-}
-
 func updateAssambleInfo(updatedAssambleInfo models.AssambleInfo) error {
 	allAssambleInfo, err := getAllAssambleInfo()
 	if err != nil {
-		log.Printf("Не удалось получить объекты : []models.AssambleInfo :", err.Error())
+		log.Printf("Не удалось получить объекты : []models.AssambleInfo : %s", err.Error())
 		return err
 	}
 	for i, assambleInfo := range allAssambleInfo {
@@ -325,8 +351,8 @@ func addAssambleInfo(allUsersMessage []models.MessageData) error {
 	assambleInfo := models.AssambleInfo{
 		ID:                  int(rnd),
 		AllUsersMessageData: allUsersMessage,
-		ComeUsers:           []string{},
-		NotComeUsers:        []string{},
+		ComeUsers:           make(map[string][]models.MessageData),
+		NotComeUsers:        make(map[string][]models.MessageData),
 	}
 
 	allAssambleInfos = append(allAssambleInfos, assambleInfo)
