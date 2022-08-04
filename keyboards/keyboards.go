@@ -14,6 +14,7 @@ const (
 	AssembleText = "Квадрат ОБЩИЙ СБОР!👊"
 	ComingText   = "Уже выдвигаюсь!🧑‍🦽"
 	LaterText    = "Буду попозжа!🤼"
+	ShowText     = "Показать рыцарей ⚔️"
 )
 
 var AssembleKeyboard = tgbotapi.NewReplyKeyboard(
@@ -26,5 +27,14 @@ var InlineArriveKeyboard = tgbotapi.NewInlineKeyboardMarkup(
 	tgbotapi.NewInlineKeyboardRow(
 		tgbotapi.NewInlineKeyboardButtonData(ComingText, COMING),
 		tgbotapi.NewInlineKeyboardButtonData(LaterText, LATER),
+	),
+)
+var UpdatedInlineArriveKeyboard = tgbotapi.NewInlineKeyboardMarkup(
+	tgbotapi.NewInlineKeyboardRow(
+		tgbotapi.NewInlineKeyboardButtonData(ComingText, COMING),
+		tgbotapi.NewInlineKeyboardButtonData(LaterText, LATER),
+	),
+	tgbotapi.NewInlineKeyboardRow(
+		tgbotapi.NewInlineKeyboardButtonData(ShowText, SHOW),
 	),
 )

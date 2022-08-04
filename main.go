@@ -174,42 +174,89 @@ func main() {
 				log.Printf("Ошибка: %s", err.Error())
 			}
 
-			if update.CallbackQuery.Data == keyboards.COMING {
-				inNotComes := false
-				for i, username := range currentAssambleInfo.NotComeUsers {
-					if username == currentUser.Username {
-						currentAssambleInfo.NotComeUsers = removeIndexAssambleUsers(currentAssambleInfo.NotComeUsers, i)
-						currentAssambleInfo.ComeUsers = append(currentAssambleInfo.ComeUsers, currentUser.Username)
-						inNotComes = true
-						break
-					}
-				}
-				if !inNotComes {
-					currentAssambleInfo.ComeUsers = append(currentAssambleInfo.ComeUsers, currentUser.Username)
-				}
+			sendAllUpdatedKeyboard(bot, currentAssambleInfo)
 
-				updateAssambleInfo(currentAssambleInfo)
-				sendAllUpdatedKeyboard(bot, currentAssambleInfo)
+			if update.CallbackQuery.Data == keyboards.COMING {
+				comingCallbackHandler(bot, currentAssambleInfo, currentUser, users)
 
 			} else if update.CallbackQuery.Data == keyboards.LATER {
-				inComes := false
-
-				for i, username := range currentAssambleInfo.ComeUsers {
-					if username == currentUser.Username {
-						currentAssambleInfo.ComeUsers = removeIndexAssambleUsers(currentAssambleInfo.ComeUsers, i)
-						currentAssambleInfo.NotComeUsers = append(currentAssambleInfo.NotComeUsers, currentUser.Username)
-						inComes = true
-						break
-					}
-				}
-
-				if !inComes {
-					currentAssambleInfo.NotComeUsers = append(currentAssambleInfo.NotComeUsers, currentUser.Username)
-				}
-
-				updateAssambleInfo(currentAssambleInfo)
-				sendAllUpdatedKeyboard(bot, currentAssambleInfo)
+				laterCallbackHandler(bot, currentAssambleInfo, currentUser, users)
 			}
+		}
+	}
+}
+
+func laterCallbackHandler(
+	bot *tgbotapi.BotAPI,
+	currentAssambleInfo models.AssambleInfo,
+	currentUser models.User,
+	users []models.User,
+) {
+	for _, username := range currentAssambleInfo.NotComeUsers {
+		if username == currentUser.Username {
+			return
+		}
+	}
+
+	inComes := false
+
+	for i, username := range currentAssambleInfo.ComeUsers {
+		if username == currentUser.Username {
+			currentAssambleInfo.ComeUsers = removeIndexAssambleUsers(currentAssambleInfo.ComeUsers, i)
+			currentAssambleInfo.NotComeUsers = append(currentAssambleInfo.NotComeUsers, currentUser.Username)
+			inComes = true
+			break
+		}
+	}
+
+	if !inComes {
+		currentAssambleInfo.NotComeUsers = append(currentAssambleInfo.NotComeUsers, currentUser.Username)
+	}
+
+	updateAssambleInfo(currentAssambleInfo)
+
+	for _, user := range users {
+		text := fmt.Sprintf("@%s: будет как освободится⏳", currentUser.Username)
+		msg := tgbotapi.NewMessage(user.ChatID, text)
+		if _, err := bot.Send(msg); err != nil {
+			log.Printf("Пользователю %s не отправилось сообщение. %s", user.Username, err.Error())
+		}
+	}
+}
+
+func comingCallbackHandler(
+	bot *tgbotapi.BotAPI,
+	currentAssambleInfo models.AssambleInfo,
+	currentUser models.User,
+	users []models.User,
+) {
+	for _, username := range currentAssambleInfo.ComeUsers {
+		if username == currentUser.Username {
+			return
+		}
+	}
+
+	inNotComes := false
+
+	for i, username := range currentAssambleInfo.NotComeUsers {
+		if username == currentUser.Username {
+			currentAssambleInfo.NotComeUsers = removeIndexAssambleUsers(currentAssambleInfo.NotComeUsers, i)
+			currentAssambleInfo.ComeUsers = append(currentAssambleInfo.ComeUsers, currentUser.Username)
+			inNotComes = true
+			break
+		}
+	}
+	if !inNotComes {
+		currentAssambleInfo.ComeUsers = append(currentAssambleInfo.ComeUsers, currentUser.Username)
+	}
+
+	updateAssambleInfo(currentAssambleInfo)
+
+	for _, user := range users {
+		text := fmt.Sprintf("@%s: мчиться на райончик🏃", currentUser.Username)
+		msg := tgbotapi.NewMessage(user.ChatID, text)
+		if _, err := bot.Send(msg); err != nil {
+			log.Printf("Пользователю %s не отправилось сообщение. %s", user.Username, err.Error())
 		}
 	}
 }
@@ -234,17 +281,7 @@ func prepareCallback(assambleInfo models.AssambleInfo, callbackID string, callba
 
 func sendAllUpdatedKeyboard(bot *tgbotapi.BotAPI, assambleInfo models.AssambleInfo) {
 	for _, msgData := range assambleInfo.AllUsersMessageData {
-		comingText := fmt.Sprintf("Уже выдвигаюсь!🧑‍🦽\n[Рыцарей: %d]", len(assambleInfo.ComeUsers))
-		laterText := fmt.Sprintf("Буду попозжа!🤼\n[Рыцарей: %d]", len(assambleInfo.NotComeUsers))
-		keyboard := tgbotapi.NewInlineKeyboardMarkup(
-			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData(comingText, keyboards.COMING),
-				tgbotapi.NewInlineKeyboardButtonData(laterText, keyboards.LATER),
-			),
-			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("Показать рыцарей ⚔️", keyboards.SHOW),
-			),
-		)
+		keyboard := keyboards.UpdatedInlineArriveKeyboard
 		cfg := tgbotapi.NewEditMessageReplyMarkup(msgData.ChatID, int(msgData.MessageID), keyboard)
 		bot.Send(cfg)
 	}
